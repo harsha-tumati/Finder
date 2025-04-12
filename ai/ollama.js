@@ -4,7 +4,7 @@ const fg = require('fast-glob');
 const { execSync } = require('child_process');
 let filteredApps = [];
 try {
-    filteredApps = execSync(`snap list | awk 'NR>1 {print $1}'`)
+    filteredApps = execSync(`ls /usr/share/applications ~/.local/share/applications /var/lib/snapd/desktop/applications | sed 's/\\.desktop$//'`)
         .toString()
         .split('\n')
         .filter(Boolean); // removes empty lines
@@ -48,4 +48,4 @@ You must respond with EXACTLY one line in this strict format: "<intent> <filenam
     return data.response.trim();
 }
 
-module.exports = { askOllama };
+module.exports = {askOllama};

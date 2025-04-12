@@ -9,7 +9,7 @@ function playFile(filePath) {
     exec(`open "${filePath}"`);
 }
 function openApp(filePath) {
-    exec(`snap run "${filePath.toLowerCase()}"`);
+    exec(`"${filePath.toLowerCase()}" &`);
 }
 
 module.exports = { openFile, playFile,openApp };
