@@ -1,0 +1,14 @@
+{
+  "name": "Finder",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^27.1.1",
+    "node-fetch": "^3.3.2",
+    "undici": "^7.8.0"
+  }
+}
