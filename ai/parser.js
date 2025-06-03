@@ -1,6 +1,6 @@
 function parseCommandFromAIResponse(response) {
     if (!response) return null;
-    console.log("Raw response",response);
+    // console.log("Raw response",response);
     //const match = response.match(/\b(open|play)\s+(?:the\s+file\s+)?([\w\-.]+\.\w+)/i);
     const [intent, target] = response.split(" ")
     // if (match) {

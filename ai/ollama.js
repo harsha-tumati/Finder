@@ -1,51 +1,79 @@
 const { fetch } = require('undici');
-
 const fg = require('fast-glob');
 const { execSync } = require('child_process');
-let filteredApps = [];
-try {
-    filteredApps = execSync(`ls /usr/share/applications ~/.local/share/applications /var/lib/snapd/desktop/applications | sed 's/\\.desktop$//'`)
-        .toString()
-        .split('\n')
-        .filter(Boolean); // removes empty lines
-    // console.log(output);
-    //  filteredApps= output.filter(app => app.includes('nodejs'));
-    console.log(filteredApps); // array of matching app names
-} catch (err) {
-    console.error('Error:', err.message);
-}
-const files = fg.sync(['/home/harsha/Documents/**/*'], {
-  onlyFiles: true,
-  dot: false // exclude hidden files/folders
+const path = require('path');
+const os = require('os');
+const { cosineSimilarity, findBestMatch } = require('../utils/semanticSearch');
+
+let vectorDB = [];
+
+const files = fg.sync([path.join(os.homedir(), 'Documents/**/*')], {
+    onlyFiles: true,
+    dot: false,
 });
 
-console.log("working",files);
-// Example usage
-const allFiles = files;
-
-async function askOllama(userPrompt) {
-    const systemPrompt = `
-You must respond with EXACTLY one line in this strict format: "<intent> <filename_or_appname>", such as "open notes.txt", "play song.mp3", or "open_app Chrome". 
-- INTENT is REQUIRED and must be one of: open, play, open_app.
-- Do NOT explain, add comments, or use any other words.
-- Only use filenames from this list: ${allFiles}
-- Only use app names from this list: ${filteredApps}
-- For .mp3/.mp4/.wav/.mkv/.mov use 'play' intent.
-- For .txt/.pdf/.docx and similar documents
-- Use from given list of file names and app names only, Don't change the casing.`
-    console.log(systemPrompt);
-    const response = await fetch("http://localhost:11434/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: "mistral",
-            prompt: `${systemPrompt}\n\nUser: ${userPrompt}`,
-            stream: false,
-        }),
-    });
-
-    const data = await response.json();
-    return data.response.trim();
+let apps = [];
+try {
+    apps = execSync(`ls /usr/share/applications ~/.local/share/applications /var/lib/snapd/desktop/applications | sed 's/\\.desktop$//'`)
+        .toString().split('\n').filter(Boolean);
+} catch (err) {
+    console.error('App scan failed:', err.message);
 }
 
-module.exports = {askOllama};
+// Embeds text using BGE-M3 via Ollama
+async function getEmbedding(text) {
+    const res = await fetch('http://localhost:11434/api/embeddings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'bge-m3', prompt: text }),
+    });
+    const data = await res.json();
+    //console.log('Embedded', data);
+    return data.embedding;
+}
+
+// Builds in-memory vector DB from file/app names
+async function initializeEmbeddings() {
+    const items = [
+        ...files.map(f => ({ type: 'file', name: path.basename(f) })),
+        ...apps.map(app => ({ type: 'app', name: app })),
+    ];
+
+    vectorDB = await Promise.all(items.map(async item => {
+        try {
+            const embedding = await getEmbedding(item.name);
+            //console.log("First embedding:", embedding[0]);
+            return { ...item, embedding };
+            //console.log("Loaded embeddings:", embedding.length);
+
+
+        } catch {
+            return null;
+        }
+    }));
+
+    vectorDB = vectorDB.filter(Boolean); // remove failed
+    console.log(`✅ Embedded ${vectorDB.length} items`);
+    //console.log(` Embedding ${vectorDB[0]} items`);
+}
+
+// Main function: uses vector DB + user prompt to find best match
+async function askOllama(prompt) {
+    const queryEmbedding = await getEmbedding(prompt);
+    //console.log(queryEmbedding);
+    const match = findBestMatch(queryEmbedding, vectorDB);
+    console.log(match);
+    if (!match) return null;
+    let intent = 'open';
+    if(match.type === 'app') intent = 'open_app';
+    else if (match.name.match(/\.(mp3|mp4|wav|mkv|mov)$/)) intent = 'play';
+    // let intent = 'open'; // fallback
+    // const lower = prompt.toLowerCase();
+    // if (lower.includes('play')) intent = 'play';
+    // else if (lower.includes('open') && match.type === 'app') intent = 'open_app';
+    // else if (match.name.match(/\.(mp3|mp4|wav|mkv|mov)$/)) intent = 'play';
+
+    return { intent, target: match.name };
+}
+
+module.exports = { askOllama, initializeEmbeddings };

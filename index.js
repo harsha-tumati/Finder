@@ -1,19 +1,14 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu } = require('electron');
 const path = require('path');
 const os = require('os');
-const { askOllama } = require('./ai/ollama');
+const { askOllama, initializeEmbeddings } = require('./ai/ollama');
 const { parseCommandFromAIResponse } = require('./ai/parser');
-const { searchFile } = require('./utils/fileSearch');
-const { openFile, playFile,openApp} = require('./utils/actions');
+const { openFile, playFile, openApp } = require('./utils/actions');
 
-if (!app.requestSingleInstanceLock()) {
-    app.quit();
-}
+if (!app.requestSingleInstanceLock()) app.quit();
 
 let mainWindow;
 let tray = null;
-
-const searchPaths = [path.join(os.homedir(),'Documents')];
 
 async function createWindow() {
     mainWindow = new BrowserWindow({
@@ -29,12 +24,12 @@ async function createWindow() {
             contextIsolation: false,
         },
     });
-
     await mainWindow.loadFile('renderer/index.html');
     mainWindow.hide();
 }
 
 app.whenReady().then(async () => {
+    await initializeEmbeddings(); // ⚠️ Generate vector DB on startup
     await createWindow();
     tray = new Tray(path.join(__dirname, 'icon.png'));
     const contextMenu = Menu.buildFromTemplate([
@@ -52,26 +47,22 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => globalShortcut.unregisterAll());
 
 ipcMain.handle('ask-ai', async (event, prompt) => {
-    console.log("Prompt",prompt);
-    const response = await askOllama(prompt);
-    console.log("Response",response);
-    const command = parseCommandFromAIResponse(response);
-
+    const command = await askOllama(prompt); // now includes semantic search
     if (!command) return "Couldn't understand the command.";
-    // let foundFile = null;
-    // for (const dir of searchPaths) {
-    //     const results = searchFile(dir, command.target);
-    //     if (results.length > 0) {
-    //         foundFile = results[0];
-    //         break;
-    //     }
-    //}
-    //if (!foundFile) return `Couldn't find any file matching "${command.target}"`;
-    console.log("Command",command);
-    if (command.intent === 'open') openFile(command.target);
-    else if (command.intent === 'play') playFile(command.target);
-    else if(command.intent === 'open_app') openApp(command.target);
-    return `Executing ${command.intent} on ${command.target}\n`;
+    console.log(command);
+    if (command.intent === 'open') {
+        console.log(`Opening ${command.target}`);
+        openFile(command.target);
+
+    }
+    else if (command.intent === 'play'){
+        console.log(`Playing ${command.target}`);
+        playFile(command.target);
+    }
+    else if (command.intent === 'open_app') {
+        console.log(`Opening ${command.target}`);
+        openApp(command.target);
+    }
+
+    return `Executing ${command.intent} on ${command.target}`;
 });
-
-
