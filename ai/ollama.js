@@ -3,7 +3,10 @@ const fg = require('fast-glob');
 const { execSync } = require('child_process');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const { cosineSimilarity, findBestMatch } = require('../utils/semanticSearch');
+
+const tempFilePath = path.join(os.tmpdir(), 'embeddings-temp.json');
 
 let vectorDB = [];
 
@@ -28,12 +31,24 @@ async function getEmbedding(text) {
         body: JSON.stringify({ model: 'bge-m3', prompt: text }),
     });
     const data = await res.json();
-    //console.log('Embedded', data);
     return data.embedding;
 }
 
-// Builds in-memory vector DB from file/app names
+// Builds vector DB from file/app names or loads from temp file
 async function initializeEmbeddings() {
+    // ✅ If temp file exists, load from it
+    if (fs.existsSync(tempFilePath)) {
+        try {
+            const data = fs.readFileSync(tempFilePath, 'utf-8');
+            vectorDB = JSON.parse(data);
+            console.log(`✅ Loaded ${vectorDB.length} embeddings from temp file`);
+            console.log('📝 Temp embeddings path:', tempFilePath);
+            return;
+        } catch (err) {
+            console.error('⚠️ Failed to load embeddings from temp file:', err);
+        }
+    }
+
     const items = [
         ...files.map(f => ({ type: 'file', name: path.basename(f) })),
         ...apps.map(app => ({ type: 'app', name: app })),
@@ -42,38 +57,35 @@ async function initializeEmbeddings() {
     vectorDB = await Promise.all(items.map(async item => {
         try {
             const embedding = await getEmbedding(item.name);
-            //console.log("First embedding:", embedding[0]);
             return { ...item, embedding };
-            //console.log("Loaded embeddings:", embedding.length);
-
-
         } catch {
             return null;
         }
     }));
 
-    vectorDB = vectorDB.filter(Boolean); // remove failed
-    console.log(`✅ Embedded ${vectorDB.length} items`);
-    //console.log(` Embedding ${vectorDB[0]} items`);
+    vectorDB = vectorDB.filter(Boolean);
+    fs.writeFileSync(tempFilePath, JSON.stringify(vectorDB, null, 2));
+    console.log(`✅ Generated and saved ${vectorDB.length} embeddings`);
 }
 
-// Main function: uses vector DB + user prompt to find best match
+// Deletes temp file on exit
+function cleanupEmbeddings() {
+    if (fs.existsSync(tempFilePath)) {
+        console.log('tempFilePath =', tempFilePath);
+        fs.unlinkSync(tempFilePath);
+        console.log('🧹 Temporary embedding DB deleted');
+    }
+}
+
+// Uses vector DB + user prompt to find best match
 async function askOllama(prompt) {
     const queryEmbedding = await getEmbedding(prompt);
-    //console.log(queryEmbedding);
     const match = findBestMatch(queryEmbedding, vectorDB);
-    console.log(match);
     if (!match) return null;
     let intent = 'open';
-    if(match.type === 'app') intent = 'open_app';
+    if (match.type === 'app') intent = 'open_app';
     else if (match.name.match(/\.(mp3|mp4|wav|mkv|mov)$/)) intent = 'play';
-    // let intent = 'open'; // fallback
-    // const lower = prompt.toLowerCase();
-    // if (lower.includes('play')) intent = 'play';
-    // else if (lower.includes('open') && match.type === 'app') intent = 'open_app';
-    // else if (match.name.match(/\.(mp3|mp4|wav|mkv|mov)$/)) intent = 'play';
-
     return { intent, target: match.name };
 }
 
-module.exports = { askOllama, initializeEmbeddings };
+module.exports = { askOllama, initializeEmbeddings, cleanupEmbeddings };

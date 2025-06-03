@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu } = require('electron');
 const path = require('path');
 const os = require('os');
-const { askOllama, initializeEmbeddings } = require('./ai/ollama');
+const { askOllama, initializeEmbeddings,cleanupEmbeddings } = require('./ai/ollama');
 const { parseCommandFromAIResponse } = require('./ai/parser');
 const { openFile, playFile, openApp } = require('./utils/actions');
 
@@ -44,7 +44,10 @@ app.whenReady().then(async () => {
     });
 });
 
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+    cleanupEmbeddings();
+    globalShortcut.unregisterAll()
+});
 
 ipcMain.handle('ask-ai', async (event, prompt) => {
     const command = await askOllama(prompt); // now includes semantic search
